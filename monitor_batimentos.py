@@ -154,7 +154,7 @@ async def list_available_devices() -> None:
 async def find_devices(device_ids: Optional[List[str]]) -> List[BLEDevice]:
     print("Procurando sensores BLE...")
     discovered = await BleakScanner.discover(timeout=10, return_adv=True)
-    devices = [device for device, _advertisement in discovered.values()]
+    devices = [advertisement[0] for advertisement in discovered.values()]
     candidates: List[BLEDevice] = []
 
     if device_ids:
@@ -458,7 +458,7 @@ def create_overlay_server(
             self._send_response(404, "text/plain; charset=utf-8", b"Nao encontrado")
 
         def log_message(self, _format: str, *_args: object) -> None:
-            return
+            del _format, _args
 
     return ThreadingHTTPServer((OVERLAY_HOST, OVERLAY_PORT), OverlayRequestHandler)
 
@@ -469,10 +469,10 @@ async def monitor_device(
     latest_bpm: Optional[int] = None
 
     def handle_measurement(_sender: int, data: bytearray) -> None:
+        del _sender
         nonlocal latest_bpm
         latest_bpm = parse_heart_rate(data)
 
-    label = f"{device.name or 'sensor'} [{device.address}]"
     display.update(device.address, "Conectando...")
     try:
         async with BleakClient(device, timeout=BLE_CONNECT_TIMEOUT_SECONDS) as client:
@@ -538,7 +538,7 @@ async def record(device_ids: Optional[List[str]], output_dir: Path) -> None:
         loop.call_soon_threadsafe(sys.stderr.write, f"{message}\n")
 
     def register_ant_device(device: Tuple[int, int, int]) -> None:
-        device_id, _device_type, _transmission_type = device
+        device_id = device[0]
         overlay_id = f"ANT_{device_id:05d}"
         output_path = output_dir / output_filename(overlay_id)
         register_device_page(output_dir, reading_paths, overlay_id, output_path)
