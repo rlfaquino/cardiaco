@@ -1,0 +1,7 @@
+ACTION!="add", GOTO="cardiaco_ant_rules_end"
+SUBSYSTEM!="usb", GOTO="cardiaco_ant_rules_end"
+
+ATTR{idVendor}=="0fcf", ATTR{idProduct}=="1008", TAG+="uaccess", GROUP="plugdev", MODE="0660"
+ATTR{idVendor}=="0fcf", ATTR{idProduct}=="1009", TAG+="uaccess", GROUP="plugdev", MODE="0660"
+
+LABEL="cardiaco_ant_rules_end"

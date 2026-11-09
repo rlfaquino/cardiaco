@@ -4,16 +4,21 @@ import html
 import json
 import os
 import re
+import shutil
+import sys
+import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from bleak import BleakClient, BleakScanner
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
+
+from antplus import monitor_ant_heart_rate, scan_ant_devices
 
 HEART_RATE_SERVICE_UUID = "0000180d-0000-1000-8000-00805f9b34fb"
 HEART_RATE_MEASUREMENT_UUID = "00002a37-0000-1000-8000-00805f9b34fb"
@@ -21,6 +26,64 @@ OVERLAY_HOST = "127.0.0.1"
 OVERLAY_PORT = 8765
 READING_MAX_AGE_SECONDS = 3
 BLE_CONNECT_TIMEOUT_SECONDS = 30
+
+
+class LiveStatusDisplay:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._stream = sys.stdout
+        self._rows: Dict[str, Tuple[str, str]] = {}
+        self._rendered_rows = 0
+
+    def register(self, sensor_id: str, label: str) -> None:
+        with self._lock:
+            if sensor_id in self._rows:
+                return
+            self._rows[sensor_id] = (label, "Aguardando leitura")
+            self._redraw()
+
+    def update(self, sensor_id: str, status: str) -> None:
+        with self._lock:
+            row = self._rows.get(sensor_id)
+            if row is None:
+                return
+            self._rows[sensor_id] = (row[0], status)
+            row_index = list(self._rows).index(sensor_id)
+            if not self._rendered_rows:
+                self._redraw()
+                return
+
+            self._move_to_row(row_index)
+            self._write_row(*self._rows[sensor_id], newline=False)
+            self._move_to_row_end(row_index)
+
+    def _redraw(self) -> None:
+        if self._rendered_rows:
+            self._stream.write(f"\x1b[{self._rendered_rows}A")
+        for label, status in self._rows.values():
+            self._write_row(label, status, newline=True)
+        self._rendered_rows = len(self._rows)
+        self._stream.flush()
+
+    def _move_to_row(self, row_index: int) -> None:
+        distance = self._rendered_rows - row_index
+        if distance:
+            self._stream.write(f"\x1b[{distance}A")
+        self._stream.write("\r")
+
+    def _move_to_row_end(self, row_index: int) -> None:
+        distance = self._rendered_rows - row_index
+        if distance:
+            self._stream.write(f"\x1b[{distance}B")
+        self._stream.write("\r")
+        self._stream.flush()
+
+    def _write_row(self, label: str, status: str, newline: bool) -> None:
+        width = max(1, shutil.get_terminal_size(fallback=(120, 24)).columns - 1)
+        text = f"{label}: {status}"
+        self._stream.write(f"\x1b[2K{text[:width]}")
+        if newline:
+            self._stream.write("\n")
 
 
 def parse_heart_rate(data: bytearray) -> int:
@@ -36,26 +99,56 @@ def parse_heart_rate(data: bytearray) -> int:
 
 
 async def list_available_devices() -> None:
-    print("Buscando dispositivos Bluetooth próximos...")
-    discovered = await BleakScanner.discover(timeout=10, return_adv=True)
-    devices = sorted(
-        discovered.values(),
-        key=lambda item: (item[0].name or "").casefold(),
-    )
-    if not devices:
-        print("Nenhum dispositivo Bluetooth encontrado.")
-        return
+    print("=== Dispositivos BLE ===")
+    try:
+        discovered = await BleakScanner.discover(timeout=10, return_adv=True)
+    except (BleakError, OSError) as error:
+        print(f"Não foi possível buscar dispositivos BLE: {error}")
+    else:
+        devices = sorted(
+            discovered.values(),
+            key=lambda item: (item[0].name or "").casefold(),
+        )
+        if not devices:
+            print("Nenhum dispositivo BLE encontrado.")
+        else:
+            print(f"Dispositivos encontrados: {len(devices)}")
+            for device, advertisement in devices:
+                has_heart_rate_service = any(
+                    uuid.lower() == HEART_RATE_SERVICE_UUID
+                    for uuid in advertisement.service_uuids
+                )
+                heart_rate_label = (
+                    " [serviço cardíaco]" if has_heart_rate_service else ""
+                )
+                print(
+                    f"- {device.name or 'Sem nome'} "
+                    f"[{device.address}]{heart_rate_label}"
+                )
 
-    print(f"Dispositivos encontrados: {len(devices)}")
-    for device, advertisement in devices:
-        has_heart_rate_service = any(
-            uuid.lower() == HEART_RATE_SERVICE_UUID
-            for uuid in advertisement.service_uuids
-        )
-        heart_rate_label = " [serviço cardíaco]" if has_heart_rate_service else ""
+    print("\n=== Dispositivos ANT+ ===")
+    devices, error = await asyncio.get_running_loop().run_in_executor(
+        None, scan_ant_devices, 10
+    )
+    if error:
         print(
-            f"- {device.name or 'Sem nome'} [{device.address}]{heart_rate_label}"
+            "Não foi possível ler dispositivos ANT+: "
+            f"{error}. Verifique se o dongle USB ANT+ está conectado e acessível."
         )
+    elif not devices:
+        print("Nenhum dispositivo ANT+ encontrado.")
+    else:
+        print(f"Dispositivos encontrados: {len(devices)}")
+        for device_id, device_type, transmission_type in devices:
+            device_label = (
+                "Frequência cardíaca"
+                if device_type == 120
+                else f"Tipo ANT+ {device_type}"
+            )
+            print(
+                f"- {device_label} [ID {device_id}, "
+                f"transmissão {transmission_type}]"
+            )
 
 
 async def find_devices(device_ids: Optional[List[str]]) -> List[BLEDevice]:
@@ -100,10 +193,8 @@ async def find_devices(device_ids: Optional[List[str]]) -> List[BLEDevice]:
 
     if not candidates:
         if not devices:
-            raise RuntimeError(
-                "Nenhum dispositivo BLE foi encontrado. Verifique se o sensor "
-                "está ligado e próximo, e se o Bluetooth está habilitado."
-            )
+            print("Nenhum dispositivo BLE encontrado; continuando busca ANT+.")
+            return []
         candidates = devices
         print(
             "Nenhum dispositivo anunciou o serviço cardíaco. "
@@ -218,8 +309,8 @@ def render_overlay_page(device_id: str) -> str:
 
 def update_device_pages(
     output_dir: Path, active_output_paths: List[Path]
-) -> dict[str, Path]:
-    reading_paths: dict[str, Path] = {}
+) -> Dict[str, Path]:
+    reading_paths: Dict[str, Path] = {}
     for path in output_dir.glob("*.txt"):
         if not path.is_file():
             continue
@@ -241,6 +332,11 @@ def update_device_pages(
         page_path = output_dir / f"{device_id}.html"
         page_path.write_text(render_overlay_page(device_id), encoding="utf-8")
 
+    write_device_index(output_dir, reading_paths)
+    return reading_paths
+
+
+def write_device_index(output_dir: Path, reading_paths: Dict[str, Path]) -> None:
     index_entries = "\n".join(
         f'<li><a href="/{html.escape(device_id, quote=True)}.html">'
         f'{html.escape(device_id)}</a></li>'
@@ -272,11 +368,25 @@ def update_device_pages(
 """,
         encoding="utf-8",
     )
-    return reading_paths
+
+
+def register_device_page(
+    output_dir: Path,
+    reading_paths: Dict[str, Path],
+    device_id: str,
+    output_path: Path,
+) -> None:
+    if device_id in reading_paths:
+        return
+    reading_paths[device_id] = output_path
+    (output_dir / f"{device_id}.html").write_text(
+        render_overlay_page(device_id), encoding="utf-8"
+    )
+    write_device_index(output_dir, reading_paths)
 
 
 def create_overlay_server(
-    output_dir: Path, reading_paths: dict[str, Path]
+    output_dir: Path, reading_paths: Dict[str, Path]
 ) -> ThreadingHTTPServer:
     page_paths = {
         f"/{device_id}.html": output_dir / f"{device_id}.html"
@@ -353,7 +463,9 @@ def create_overlay_server(
     return ThreadingHTTPServer((OVERLAY_HOST, OVERLAY_PORT), OverlayRequestHandler)
 
 
-async def monitor_device(device: BLEDevice, output_path: Path) -> bool:
+async def monitor_device(
+    device: BLEDevice, output_path: Path, display: LiveStatusDisplay
+) -> bool:
     latest_bpm: Optional[int] = None
 
     def handle_measurement(_sender: int, data: bytearray) -> None:
@@ -361,34 +473,34 @@ async def monitor_device(device: BLEDevice, output_path: Path) -> bool:
         latest_bpm = parse_heart_rate(data)
 
     label = f"{device.name or 'sensor'} [{device.address}]"
-    print(f"Conectando a {label}...")
+    display.update(device.address, "Conectando...")
     try:
         async with BleakClient(device, timeout=BLE_CONNECT_TIMEOUT_SECONDS) as client:
             await client.start_notify(HEART_RATE_MEASUREMENT_UUID, handle_measurement)
             output_path.write_text("", encoding="utf-8")
-            print(f"Conectado a {label}; gravando em {output_path}.")
+            display.update(device.address, "Conectado; aguardando leitura")
             loop = asyncio.get_running_loop()
             next_sample = loop.time() + 1
             while client.is_connected:
                 await asyncio.sleep(max(0, next_sample - loop.time()))
                 if latest_bpm is not None:
-                    timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
                     output_path.write_text(str(latest_bpm), encoding="utf-8")
-                    print(f"{timestamp}  {label}: {latest_bpm} bpm")
+                    display.update(device.address, f"{latest_bpm} bpm")
 
                 next_sample += 1
                 if next_sample <= loop.time():
                     next_sample = loop.time() + 1
-        print(f"Conexão encerrada com {label}.")
+        display.update(device.address, "Conexão encerrada")
         return True
     except asyncio.TimeoutError:
-        print(
-            f"Erro Bluetooth em {label}: conexão/descoberta excedeu "
+        display.update(
+            device.address,
+            f"Erro: conexão/descoberta excedeu "
             f"{BLE_CONNECT_TIMEOUT_SECONDS}s. Aproxime e acorde o sensor e "
-            "feche outros aplicativos conectados a ele."
+            "feche outros aplicativos conectados a ele.",
         )
     except BleakError as error:
-        print(f"Erro Bluetooth em {label}: {error}")
+        display.update(device.address, f"Erro Bluetooth: {error}")
     return False
 
 
@@ -399,6 +511,7 @@ async def record(device_ids: Optional[List[str]], output_dir: Path) -> None:
         device.address: output_dir / output_filename(device.address)
         for device in devices
     }
+    display = LiveStatusDisplay()
     reading_paths = update_device_pages(output_dir, list(output_paths.values()))
     server = create_overlay_server(output_dir, reading_paths)
     server_thread = Thread(target=server.serve_forever, daemon=True)
@@ -410,21 +523,85 @@ async def record(device_ids: Optional[List[str]], output_dir: Path) -> None:
             f"Overlay {device.name or device.address}: "
             f"http://{OVERLAY_HOST}:{OVERLAY_PORT}/{page_name}"
         )
+        display.register(
+            device.address, f"{device.name or 'sensor'} [{device.address}]"
+        )
+
+    loop = asyncio.get_running_loop()
+    ant_stop_event = threading.Event()
+    ant_started_event = threading.Event()
+
+    def report_ant_status(message: str) -> None:
+        if message.startswith("ANT+: dongle detectado"):
+            ant_started_event.set()
+            return
+        loop.call_soon_threadsafe(sys.stderr.write, f"{message}\n")
+
+    def register_ant_device(device: Tuple[int, int, int]) -> None:
+        device_id, _device_type, _transmission_type = device
+        overlay_id = f"ANT_{device_id:05d}"
+        output_path = output_dir / output_filename(overlay_id)
+        register_device_page(output_dir, reading_paths, overlay_id, output_path)
+        display.register(overlay_id, f"ANT+ ID {device_id}")
+
+    def write_ant_reading(overlay_id: str, device_id: int, bpm: int) -> None:
+        output_path = reading_paths.get(overlay_id)
+        if output_path is None:
+            output_path = output_dir / output_filename(overlay_id)
+            register_device_page(output_dir, reading_paths, overlay_id, output_path)
+            display.register(overlay_id, f"ANT+ ID {device_id}")
+        output_path.write_text(str(bpm), encoding="utf-8")
+        display.update(overlay_id, f"{bpm} bpm")
+
+    def run_ant_monitor() -> None:
+        try:
+            monitor_ant_heart_rate(
+                ant_stop_event,
+                lambda device: loop.call_soon_threadsafe(register_ant_device, device),
+                lambda overlay_id, device_id, bpm: loop.call_soon_threadsafe(
+                    write_ant_reading, overlay_id, device_id, bpm
+                ),
+                report_ant_status,
+            )
+        except Exception as error:
+            report_ant_status(f"ANT+: erro durante a inicialização/leitura: {error}")
+
+    ant_thread = threading.Thread(
+        target=run_ant_monitor, name="antplus-monitor", daemon=True
+    )
+    ant_thread.start()
 
     try:
-        results = await asyncio.gather(
-            *(
-                monitor_device(device, output_paths[device.address])
-                for device in devices
-            ),
-            return_exceptions=True,
-        )
-        for result in results:
-            if isinstance(result, BaseException):
-                raise result
-        if not any(result is True for result in results):
-            raise RuntimeError("Nenhum dos sensores selecionados conseguiu conectar.")
+        ble_monitor_succeeded = False
+        if devices:
+            results = await asyncio.gather(
+                *(
+                    monitor_device(device, output_paths[device.address], display)
+                    for device in devices
+                ),
+                return_exceptions=True,
+            )
+            for result in results:
+                if isinstance(result, BaseException):
+                    raise result
+            ble_monitor_succeeded = any(result is True for result in results)
+            if not ble_monitor_succeeded and ant_thread.is_alive():
+                await asyncio.get_running_loop().run_in_executor(
+                    None, ant_thread.join
+                )
+        else:
+            print("Nenhum sensor BLE selecionado; aguardando sensores ANT+.")
+            await asyncio.get_running_loop().run_in_executor(
+                None, ant_thread.join
+            )
+
+        if not ant_started_event.is_set() and not ble_monitor_succeeded:
+            print("Nenhum sensor BLE ou dongle ANT+ disponível para monitoramento.")
     finally:
+        ant_stop_event.set()
+        ant_thread.join(timeout=10)
+        if ant_thread.is_alive():
+            print("ANT+: encerramento ainda em andamento.")
         server.shutdown()
         server.server_close()
         server_thread.join()
@@ -432,7 +609,9 @@ async def record(device_ids: Optional[List[str]], output_dir: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Lê batimentos de um sensor BLE e grava uma amostra por segundo."
+        description=(
+            "Lê batimentos de sensores BLE e ANT+ e grava uma amostra por segundo."
+        )
     )
     parser.add_argument(
         "--device",
@@ -446,7 +625,7 @@ def main() -> None:
     parser.add_argument(
         "--list",
         action="store_true",
-        help="Busca e lista todos os dispositivos Bluetooth próximos, sem conectar.",
+        help="Busca BLE e ANT+ e lista os dispositivos próximos, sem conectar.",
     )
     parser.add_argument(
         "--output-dir",

@@ -1,14 +1,17 @@
 # Monitor de frequência cardíaca BLE
 
-O script `monitor_batimentos.py` lê sensores que implementam o serviço BLE padrão
-de frequência cardíaca (`180D`) e atualiza `<id-do-dispositivo>.txt` com apenas
-a última leitura de BPM, uma vez por segundo. O horário e o BPM continuam sendo
-exibidos no terminal.
+O script `monitor_batimentos.py` lê sensores de frequência cardíaca BLE
+(serviço padrão `180D`) e ANT+ (perfil Heart Rate) ao mesmo tempo. Atualiza
+`<id-do-dispositivo>.txt` com apenas a última leitura de BPM, uma vez por
+segundo. No terminal, mantém uma linha por sensor e atualiza o BPM nessa mesma
+linha, sem limpar a tela nem imprimir uma nova linha para cada amostra.
 
 ## Instalação
 
-Requer Python 3.8 a 3.13 e Bluetooth habilitado. O projeto usa Bleak 0.22.x
-para manter compatibilidade com o BlueZ 5.53 do Ubuntu 20.04:
+Requer Python 3.8 a 3.13, Bluetooth habilitado para BLE e, opcionalmente,
+um dongle USB ANT+ para sensores ANT+. O projeto usa Bleak 0.22.x para manter
+compatibilidade com o BlueZ 5.53 do Ubuntu 20.04, além de OpenANT e PyUSB para
+ANT+:
 
 Se você usa `pyenv` e recebeu `pyenv: python: command not found`, selecione a
 versão instalada na pasta do projeto antes de continuar:
@@ -28,7 +31,7 @@ python -m pip install -r requirements.txt
 
 ## Uso
 
-Para buscar e listar todos os dispositivos Bluetooth próximos, sem conectar:
+Para buscar e listar dispositivos BLE e ANT+ próximos, sem conectar:
 
 ```bash
 python monitor_batimentos.py --list
@@ -38,13 +41,16 @@ O comando exibe o nome e o endereço Bluetooth de cada dispositivo encontrado.
 Os que anunciarem o serviço padrão de frequência cardíaca serão identificados
 na lista.
 
+A listagem exibe seções separadas para BLE e ANT+. Se não houver um dongle ANT+
+compatível/conectado, a seção ANT+ informa isso e a busca BLE também é exibida.
+
 Para procurar sensores compatíveis:
 
 ```bash
 python monitor_batimentos.py
 ```
 
-Sem `--device`, o script lista os sensores encontrados e permite selecionar
+Sem `--device`, o script lista os sensores BLE encontrados e permite selecionar
 vários números separados por vírgula (por exemplo, `1,3`). Para escolher
 dispositivos pelo endereço Bluetooth ou pelo nome, repita a opção `--device`:
 
@@ -55,6 +61,10 @@ python monitor_batimentos.py --device "NOME-DO-SENSOR-1" --device "ENDERECO-BLUE
 Cada sensor conecta e atualiza seu próprio arquivo `.txt` e página de overlay
 simultaneamente. A lista em `index.htm` inclui os dispositivos encontrados na
 pasta de saída.
+
+Sensores cardíacos ANT+ são detectados automaticamente quando há um dongle
+compatível conectado. Cada sensor ANT+ recebe um arquivo e um overlay próprios,
+com identificador `ANT_<id>`.
 
 Para gravar os arquivos em outra pasta:
 
@@ -88,6 +98,26 @@ http://127.0.0.1:8765/ENDERECO_DO_DISPOSITIVO.html
 Cada página consulta a leitura a cada segundo. Mantenha o script rodando para
 atualizar os batimentos; páginas de dispositivos sem leitura recente mostram
 `--`. O arquivo `.txt` contém somente o número do BPM mais recente.
+
+O suporte ANT+ depende do modelo do dongle. A versão atual do OpenANT procura
+sticks compatíveis com os IDs USB Dynastream `0fcf:1008` (ANTUSB2) e `0fcf:1009`
+(ANTUSB-m). Alguns sticks genéricos podem não ser reconhecidos mesmo que sejam
+vendidos como ANT+. No Linux, conecte o dongle, confira o ID com `lsusb` e, se
+necessário, configure uma regra `udev` para permitir acesso USB sem `sudo`.
+Sem o dongle, o monitor BLE continua funcionando normalmente.
+
+Para os dois IDs compatíveis acima, o projeto inclui uma regra `udev`. Instale-a
+somente depois de confirmar que o dongle aparece com um desses IDs:
+
+```bash
+sudo cp 42-ant-usb-sticks.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+sudo udevadm trigger --subsystem-match=usb
+```
+
+Desconecte e reconecte o dongle depois. A regra dá acesso ao usuário da sessão
+e ao grupo `plugdev`; se `lsusb` mostrar outro fabricante/produto, este driver
+OpenANT não reconhecerá o dispositivo automaticamente.
 
 Para servir os arquivos gerados com o servidor HTTP simples do Python (por
 exemplo, para visualizar o índice sem iniciar o monitor), abra outro terminal
