@@ -35,6 +35,29 @@ def parse_heart_rate(data: bytearray) -> int:
     return int.from_bytes(data[1 : 1 + value_size], byteorder="little")
 
 
+async def list_available_devices() -> None:
+    print("Buscando dispositivos Bluetooth próximos...")
+    discovered = await BleakScanner.discover(timeout=10, return_adv=True)
+    devices = sorted(
+        discovered.values(),
+        key=lambda item: (item[0].name or "").casefold(),
+    )
+    if not devices:
+        print("Nenhum dispositivo Bluetooth encontrado.")
+        return
+
+    print(f"Dispositivos encontrados: {len(devices)}")
+    for device, advertisement in devices:
+        has_heart_rate_service = any(
+            uuid.lower() == HEART_RATE_SERVICE_UUID
+            for uuid in advertisement.service_uuids
+        )
+        heart_rate_label = " [serviço cardíaco]" if has_heart_rate_service else ""
+        print(
+            f"- {device.name or 'Sem nome'} [{device.address}]{heart_rate_label}"
+        )
+
+
 async def find_devices(device_ids: Optional[List[str]]) -> List[BLEDevice]:
     print("Procurando sensores BLE...")
     discovered = await BleakScanner.discover(timeout=10, return_adv=True)
@@ -421,6 +444,11 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--list",
+        action="store_true",
+        help="Busca e lista todos os dispositivos Bluetooth próximos, sem conectar.",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("."),
@@ -429,6 +457,9 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
+        if args.list:
+            asyncio.run(list_available_devices())
+            return
         asyncio.run(record(args.device, args.output_dir))
     except KeyboardInterrupt:
         print("\nMonitoramento encerrado.")

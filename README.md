@@ -28,6 +28,16 @@ python -m pip install -r requirements.txt
 
 ## Uso
 
+Para buscar e listar todos os dispositivos Bluetooth próximos, sem conectar:
+
+```bash
+python monitor_batimentos.py --list
+```
+
+O comando exibe o nome e o endereço Bluetooth de cada dispositivo encontrado.
+Os que anunciarem o serviço padrão de frequência cardíaca serão identificados
+na lista.
+
 Para procurar sensores compatíveis:
 
 ```bash
