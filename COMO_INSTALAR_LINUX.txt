@@ -1,0 +1,47 @@
+====================================================================
+  MONITOR DE FREQUÊNCIA CARDÍACA (BLE + ANT+) - GUIA PARA LINUX
+====================================================================
+
+Compatível com Ubuntu, Debian, Fedora, Arch Linux, openSUSE, Alpine, etc.
+
+--------------------------------------------------------------------
+PASSO 1: INSTALAÇÃO AUTOMÁTICA
+--------------------------------------------------------------------
+Abra o Terminal nesta pasta e execute:
+
+  ./install.sh
+
+O script irá:
+1. Instalar os pacotes necessários (python3, pip, venv, libusb, bluez, udev, etc.).
+2. Adicionar seu usuário aos grupos de hardware ('plugdev', 'dialout', 'bluetooth').
+3. Instalar a regra udev do dongle ANT+ em /etc/udev/rules.d/ e recarregar.
+4. Ativar e desbloquear o serviço Bluetooth (rfkill / systemctl).
+5. Criar o ambiente virtual isolado (.venv) e instalar as dependências.
+
+* Nota: Se seu usuário foi adicionado ao grupo 'plugdev', faça logout
+  e login novamente no Linux para aplicar as permissões USB sem root.
+
+--------------------------------------------------------------------
+PASSO 2: EXECUTAR O MONITOR
+--------------------------------------------------------------------
+Para listar sensores próximos (BLE e ANT+):
+  ./run.sh --list
+
+Para iniciar o monitoramento interativo:
+  ./run.sh
+
+Para conectar a sensores específicos:
+  ./run.sh --device "NomeOuMAC"
+
+--------------------------------------------------------------------
+PASSO 3: OVERLAY PARA O OBS STUDIO
+--------------------------------------------------------------------
+Com o programa rodando, acesse no navegador ou adicione como fonte
+do tipo "Navegador" (Browser Source) no OBS Studio:
+
+  Painel com todos os atletas:
+  http://127.0.0.1:8765/index.htm
+
+  Dashboard com gráfico em tempo real:
+  http://127.0.0.1:8765/dashboard.html
+====================================================================

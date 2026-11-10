@@ -5,5 +5,7 @@ venv/
 *.txt
 !requirements.txt
 !COMO_INSTALAR_MAC.txt
+!COMO_INSTALAR_LINUX.txt
+dist/
 *.html
 index.htm
