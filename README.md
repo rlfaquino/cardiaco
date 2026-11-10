@@ -1,10 +1,6 @@
-# Monitor de frequência cardíaca BLE
+# Monitor de frequência cardíaca BLE e Ant+ de multiplos atletas 
 
-O script `monitor_batimentos.py` lê sensores de frequência cardíaca BLE
-(serviço padrão `180D`) e ANT+ (perfil Heart Rate) ao mesmo tempo. Atualiza
-`<id-do-dispositivo>.txt` com apenas a última leitura de BPM, uma vez por
-segundo. No terminal, mantém uma linha por sensor e atualiza o BPM nessa mesma
-linha, sem limpar a tela nem imprimir uma nova linha para cada amostra.
+O script `monitor_batimentos.py` lê multiplos sensores de frequência cardíaca BLE (serviço padrão `180D`) e ANT+ (perfil Heart Rate) ao mesmo tempo e gera overlay para uso no OBS Studio.
 
 ## Instalação
 
