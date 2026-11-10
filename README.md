@@ -112,7 +112,8 @@ cartão de cada sensor identifica separadamente o nome anunciado pelo
 dispositivo, seu endereço MAC ou ID ANT+ e o nome da pessoa associada. O
 dashboard mostra o BPM ao vivo de todos os sensores e um gráfico com o
 histórico de cada atleta, identificados pelos nomes configurados. As leituras
-ao vivo atualizam a cada segundo e o gráfico a cada cinco segundos; a janela
+ao vivo e o gráfico atualizam a cada segundo; após a carga inicial, o gráfico
+recebe somente as novas amostras. A janela
 do histórico pode ser ajustada entre 1 e 30 minutos.
 O dashboard também pode ser aberto diretamente em
 `http://127.0.0.1:8765/dashboard.html`.
@@ -132,7 +133,7 @@ URL tem o formato:
 http://127.0.0.1:8765/history/ENDERECO_DO_DISPOSITIVO.html
 ```
 
-Cada gráfico atualiza a cada cinco segundos e mantém o histórico em memória
+Cada gráfico atualiza a cada segundo e mantém o histórico em memória
 enquanto o monitor está rodando. O histórico começa a ser coletado quando o
 sensor é monitorado e não é preservado após reiniciar o script. A página de
 leitura atual continua consultando a cada segundo; dispositivos sem leitura

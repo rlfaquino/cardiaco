@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import html
 import json
+import math
 import os
 import re
 import shutil
@@ -249,15 +250,27 @@ class HeartRateHistory:
                 readings.popleft()
             readings.append((timestamp, bpm))
 
-    def since(self, device_id: str, minutes: int) -> List[Tuple[float, int]]:
+    def since(
+        self,
+        device_id: str,
+        minutes: int,
+        after_timestamp_ms: Optional[float] = None,
+    ) -> List[Tuple[float, int]]:
         cutoff = datetime.now().timestamp() - minutes * 60
         with self._lock:
             readings = self._readings.get(device_id, ())
-            return [
-                (timestamp * 1000, bpm)
-                for timestamp, bpm in readings
-                if timestamp >= cutoff
-            ]
+            result: List[Tuple[float, int]] = []
+            for timestamp, bpm in reversed(readings):
+                timestamp_ms = timestamp * 1000
+                if timestamp < cutoff:
+                    break
+                if (
+                    after_timestamp_ms is None
+                    or timestamp_ms > after_timestamp_ms
+                ):
+                    result.append((timestamp_ms, bpm))
+            result.reverse()
+            return result
 
 
 def sensor_name(device_id: str, sensor_names: Dict[str, str]) -> str:
@@ -486,12 +499,20 @@ def render_history_overlay_page(device_id: str, name: str) -> str:
     const timelineElement = document.getElementById("timeline");
     const statusElement = document.getElementById("status");
     let readings = [];
+    let lastTimestamp = 0;
+    let historyRequestInFlight = false;
+    let historyGeneration = 0;
+    let lastPrunedAt = 0;
 
     function drawChart() {{
       const bounds = canvas.getBoundingClientRect();
-      const ratio = window.devicePixelRatio || 1;
-      canvas.width = Math.round(bounds.width * ratio);
-      canvas.height = Math.round(bounds.height * ratio);
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      const targetWidth = Math.round(bounds.width * ratio);
+      const targetHeight = Math.round(bounds.height * ratio);
+      if (canvas.width !== targetWidth || canvas.height !== targetHeight) {{
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+      }}
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
 
       const width = bounds.width;
@@ -501,10 +522,17 @@ def render_history_overlay_page(device_id: str, name: str) -> str:
       const chartHeight = height - padding.top - padding.bottom;
       const now = Date.now();
       const start = now - Number(minutesInput.value) * 60 * 1000;
-      const visibleReadings = readings.filter(([timestamp]) => timestamp >= start);
-      const values = visibleReadings.map(([, bpm]) => bpm);
-      const minimum = values.length ? Math.min(...values) : 40;
-      const maximum = values.length ? Math.max(...values) : 200;
+      let minimum = 40;
+      let maximum = 200;
+      if (readings.length) {{
+        minimum = Infinity;
+        maximum = -Infinity;
+        for (const [timestamp, bpm] of readings) {{
+          if (timestamp < start) continue;
+          minimum = Math.min(minimum, bpm);
+          maximum = Math.max(maximum, bpm);
+        }}
+      }}
       const lower = Math.max(0, minimum - 10);
       const upper = Math.max(lower + 20, maximum + 10);
 
@@ -531,45 +559,70 @@ def render_history_overlay_page(device_id: str, name: str) -> str:
       context.textAlign = "right";
       context.fillText(new Date(now).toLocaleTimeString(), width - padding.right, height - 4);
 
-      if (!visibleReadings.length) return;
+      if (!readings.length) return;
       context.strokeStyle = "#ff4664";
       context.lineWidth = 2.5;
       context.lineJoin = "round";
       context.lineCap = "round";
       context.beginPath();
-      visibleReadings.forEach(([timestamp, bpm], index) => {{
+      let firstVisibleReading = true;
+      readings.forEach(([timestamp, bpm]) => {{
+        if (timestamp < start) return;
         const x = padding.left + (timestamp - start) / (now - start) * chartWidth;
         const y = padding.top + (upper - bpm) / (upper - lower) * chartHeight;
-        if (index === 0) context.moveTo(x, y);
+        if (firstVisibleReading) context.moveTo(x, y);
         else context.lineTo(x, y);
+        firstVisibleReading = false;
       }});
       context.stroke();
     }}
 
     async function updateHistory() {{
+      if (historyRequestInFlight) return;
+      const requestGeneration = historyGeneration;
       const minutes = Number(minutesInput.value);
       timelineElement.textContent = minutes + " min";
+      historyRequestInFlight = true;
       try {{
         const response = await fetch(
-          "{api_path}?minutes=" + minutes + "&t=" + Date.now(),
+          "{api_path}?minutes=" + minutes + "&after=" + lastTimestamp +
+            "&t=" + Date.now(),
           {{ cache: "no-store" }}
         );
         if (!response.ok) throw new Error("Falha ao consultar o histórico");
         const data = await response.json();
-        readings = data.readings;
+        if (requestGeneration !== historyGeneration) return;
+        if (data.readings.length) {{
+          readings.push(...data.readings);
+          lastTimestamp = data.readings[data.readings.length - 1][0];
+        }}
+        if (Date.now() - lastPrunedAt >= 10000) {{
+          const cutoff = Date.now() - minutes * 60 * 1000;
+          readings = readings.filter(([timestamp]) => timestamp >= cutoff);
+          lastPrunedAt = Date.now();
+        }}
         statusElement.textContent = readings.length
           ? readings.length + " amostras na janela selecionada"
           : "Aguardando leituras do sensor";
         drawChart();
       }} catch {{
         statusElement.textContent = "Histórico indisponível";
+      }} finally {{
+        historyRequestInFlight = false;
+        if (requestGeneration !== historyGeneration) updateHistory();
       }}
     }}
 
-    minutesInput.addEventListener("input", updateHistory);
+    minutesInput.addEventListener("input", () => {{
+      historyGeneration += 1;
+      readings = [];
+      lastTimestamp = 0;
+      lastPrunedAt = 0;
+      updateHistory();
+    }});
     window.addEventListener("resize", drawChart);
     updateHistory();
-    window.setInterval(updateHistory, 5000);
+    window.setInterval(updateHistory, 1000);
   </script>
 </body>
 </html>
@@ -650,6 +703,11 @@ def render_dashboard_page() -> str:
     const context = canvas.getContext("2d");
     let athletes = [];
     let histories = [];
+    let historyCursors = {};
+    let historyRequestInFlight = false;
+    let historyGeneration = 0;
+    let liveRequestInFlight = false;
+    let lastPrunedAt = 0;
 
     function colorFor(index) {
       if (index < palette.length) return palette[index];
@@ -695,9 +753,13 @@ def render_dashboard_page() -> str:
 
     function drawChart() {
       const bounds = canvas.getBoundingClientRect();
-      const ratio = window.devicePixelRatio || 1;
-      canvas.width = Math.round(bounds.width * ratio);
-      canvas.height = Math.round(bounds.height * ratio);
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      const targetWidth = Math.round(bounds.width * ratio);
+      const targetHeight = Math.round(bounds.height * ratio);
+      if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+      }
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       const width = bounds.width;
       const height = bounds.height;
@@ -706,15 +768,15 @@ def render_dashboard_page() -> str:
       const chartHeight = height - padding.top - padding.bottom;
       const now = Date.now();
       const start = now - Number(minutesInput.value) * 60 * 1000;
-      const visibleHistories = histories.map((athlete) => ({
-        ...athlete,
-        readings: athlete.readings.filter(([timestamp]) => timestamp >= start)
-      }));
-      const values = visibleHistories.flatMap((athlete) =>
-        athlete.readings.map(([, bpm]) => bpm)
-      );
-      const minimum = values.length ? Math.min(...values) : 40;
-      const maximum = values.length ? Math.max(...values) : 200;
+      let minimum = 40;
+      let maximum = 200;
+      for (const athlete of histories) {
+        for (const [timestamp, bpm] of athlete.readings) {
+          if (timestamp < start) continue;
+          minimum = Math.min(minimum, bpm);
+          maximum = Math.max(maximum, bpm);
+        }
+      }
       const lower = Math.max(0, minimum - 10);
       const upper = Math.max(lower + 20, maximum + 10);
 
@@ -741,24 +803,29 @@ def render_dashboard_page() -> str:
       context.textAlign = "right";
       context.fillText(new Date(now).toLocaleTimeString(), width - padding.right, height - 4);
 
-      visibleHistories.forEach((athlete, athleteIndex) => {
+      histories.forEach((athlete, athleteIndex) => {
         if (!athlete.readings.length) return;
         context.strokeStyle = colorFor(athleteIndex);
         context.lineWidth = 2;
         context.lineJoin = "round";
         context.lineCap = "round";
         context.beginPath();
-        athlete.readings.forEach(([timestamp, bpm], readingIndex) => {
+        let firstVisibleReading = true;
+        athlete.readings.forEach(([timestamp, bpm]) => {
+          if (timestamp < start) return;
           const x = padding.left + (timestamp - start) / (now - start) * chartWidth;
           const y = padding.top + (upper - bpm) / (upper - lower) * chartHeight;
-          if (readingIndex === 0) context.moveTo(x, y);
+          if (firstVisibleReading) context.moveTo(x, y);
           else context.lineTo(x, y);
+          firstVisibleReading = false;
         });
         context.stroke();
       });
     }
 
     async function updateLiveReadings() {
+      if (liveRequestInFlight) return;
+      liveRequestInFlight = true;
       try {
         const response = await fetch("/api/dashboard/live.json?t=" + Date.now(),
                                      { cache: "no-store" });
@@ -771,32 +838,75 @@ def render_dashboard_page() -> str:
           : "Nenhum sensor disponível";
       } catch {
         statusElement.textContent = "Não foi possível atualizar as leituras";
+      } finally {
+        liveRequestInFlight = false;
       }
     }
 
     async function updateHistories() {
+      if (historyRequestInFlight) return;
+      const requestGeneration = historyGeneration;
       const minutes = Number(minutesInput.value);
       timelineElement.textContent = minutes + " min";
+      historyRequestInFlight = true;
       try {
         const response = await fetch(
-          "/api/dashboard/history.json?minutes=" + minutes + "&t=" + Date.now(),
+          "/api/dashboard/history.json?minutes=" + minutes +
+            "&after=" + encodeURIComponent(JSON.stringify(historyCursors)) +
+            "&t=" + Date.now(),
           { cache: "no-store" }
         );
         if (!response.ok) throw new Error("Falha ao consultar o histórico");
-        histories = (await response.json()).athletes;
+        const data = await response.json();
+        if (requestGeneration !== historyGeneration) return;
+        const updates = data.athletes;
+        const currentHistories = new Map(
+          histories.map((athlete) => [athlete.id, athlete])
+        );
+        for (const update of updates) {
+          const athlete = currentHistories.get(update.id) || {
+            id: update.id, name: update.name, readings: []
+          };
+          athlete.name = update.name;
+          if (update.readings.length) {
+            athlete.readings.push(...update.readings);
+            historyCursors[update.id] =
+              update.readings[update.readings.length - 1][0];
+          }
+          currentHistories.set(update.id, athlete);
+        }
+        histories = updates.map((update) => currentHistories.get(update.id));
+        if (Date.now() - lastPrunedAt >= 10000) {
+          const cutoff = Date.now() - minutes * 60 * 1000;
+          for (const athlete of histories) {
+            athlete.readings = athlete.readings.filter(
+              ([timestamp]) => timestamp >= cutoff
+            );
+          }
+          lastPrunedAt = Date.now();
+        }
         renderLegend();
         drawChart();
       } catch {
         statusElement.textContent = "Não foi possível atualizar o histórico";
+      } finally {
+        historyRequestInFlight = false;
+        if (requestGeneration !== historyGeneration) updateHistories();
       }
     }
 
-    minutesInput.addEventListener("input", updateHistories);
+    minutesInput.addEventListener("input", () => {
+      historyGeneration += 1;
+      histories = [];
+      historyCursors = {};
+      lastPrunedAt = 0;
+      updateHistories();
+    });
     window.addEventListener("resize", drawChart);
     updateLiveReadings();
     updateHistories();
     window.setInterval(updateLiveReadings, 1000);
-    window.setInterval(updateHistories, 5000);
+    window.setInterval(updateHistories, 1000);
   </script>
 </body>
 </html>
@@ -1077,6 +1187,36 @@ def create_overlay_server(
                     )
                     return
 
+                cursors: Dict[str, float] = {}
+                encoded_cursors = query.get("after", ["{}"])[0]
+                if len(encoded_cursors) > 4096:
+                    self._send_response(
+                        400,
+                        "application/json; charset=utf-8",
+                        b'{"error":"Cursor do historico muito grande"}',
+                    )
+                    return
+                try:
+                    cursor_data = json.loads(encoded_cursors)
+                    if not isinstance(cursor_data, dict) or any(
+                        not isinstance(device_id, str)
+                        or not isinstance(timestamp, (int, float))
+                        or not math.isfinite(timestamp)
+                        for device_id, timestamp in cursor_data.items()
+                    ):
+                        raise ValueError("invalid cursor")
+                    cursors = {
+                        device_id: float(timestamp)
+                        for device_id, timestamp in cursor_data.items()
+                    }
+                except (TypeError, ValueError):
+                    self._send_response(
+                        400,
+                        "application/json; charset=utf-8",
+                        b'{"error":"Cursor do historico invalido"}',
+                    )
+                    return
+
                 with sensor_names_lock:
                     devices = [
                         (device_id, sensor_name(device_id, sensor_names))
@@ -1086,7 +1226,9 @@ def create_overlay_server(
                     {
                         "id": device_id,
                         "name": name,
-                        "readings": history.since(device_id, minutes),
+                        "readings": history.since(
+                            device_id, minutes, cursors.get(device_id)
+                        ),
                     }
                     for device_id, name in devices
                 ]
@@ -1124,8 +1266,26 @@ def create_overlay_server(
                     )
                     return
 
+                try:
+                    after_timestamp_ms = float(query.get("after", ["0"])[0])
+                except ValueError:
+                    after_timestamp_ms = math.nan
+                if not math.isfinite(after_timestamp_ms) or after_timestamp_ms < 0:
+                    self._send_response(
+                        400,
+                        "application/json; charset=utf-8",
+                        b'{"error":"Cursor do historico invalido"}',
+                    )
+                    return
+
                 body = json.dumps(
-                    {"readings": history.since(device_id, minutes)}
+                    {
+                        "readings": history.since(
+                            device_id,
+                            minutes,
+                            after_timestamp_ms or None,
+                        )
+                    }
                 ).encode("utf-8")
                 self._send_response(200, "application/json; charset=utf-8", body)
                 return
