@@ -58,6 +58,26 @@ dispositivos pelo endereço Bluetooth ou pelo nome, repita a opção `--device`:
 python monitor_batimentos.py --device "NOME-DO-SENSOR-1" --device "ENDERECO-BLUETOOTH-DO-SENSOR-2"
 ```
 
+Use `--name ID=NOME` para identificar quem está usando cada sensor. O ID pode
+ser o endereço Bluetooth, o nome Bluetooth do dispositivo ou o identificador
+ANT+ (`ANT_<id>`). Repita a opção para nomear vários sensores:
+
+```bash
+python monitor_batimentos.py \
+  --name "AA:BB:CC:DD:EE:FF=Ana" \
+  --name "ANT_12345=Bruno"
+```
+
+O nome informado aparece no título do gráfico histórico e no índice de
+overlays, no lugar do identificador do sensor. Sem `--name`, o comportamento
+continua o mesmo e o identificador é exibido.
+
+Também é possível alterar o nome diretamente na página inicial
+`http://127.0.0.1:8765/index.htm`: edite o campo do sensor e clique em
+**Salvar nome**. A mudança atualiza o índice e o título do gráfico histórico e
+fica salva em `sensor_names.json` na pasta de saída, inclusive entre execuções.
+Um nome passado com `--name` continua tendo prioridade ao iniciar o monitor.
+
 Cada sensor conecta e atualiza seu próprio arquivo `.txt` e página de overlay
 simultaneamente. A lista em `index.htm` inclui os dispositivos encontrados na
 pasta de saída.
@@ -86,18 +106,38 @@ http://127.0.0.1:8765/index.htm
 ```
 
 O arquivo `index.htm` na pasta de saída é atualizado a cada execução e lista os
-dispositivos disponíveis. Selecione um dispositivo para abrir sua página
-`<id-do-dispositivo>.html`. Para exibir vários ao mesmo tempo, adicione uma
-fonte **Navegador** no OBS para cada sensor, usando a URL da página
-correspondente, por exemplo:
+dispositivos disponíveis, com links separados para a leitura atual e para o
+histórico de cada sensor, além de um link para o dashboard conjunto. O
+cartão de cada sensor identifica separadamente o nome anunciado pelo
+dispositivo, seu endereço MAC ou ID ANT+ e o nome da pessoa associada. O
+dashboard mostra o BPM ao vivo de todos os sensores e um gráfico com o
+histórico de cada atleta, identificados pelos nomes configurados. As leituras
+ao vivo atualizam a cada segundo e o gráfico a cada cinco segundos; a janela
+do histórico pode ser ajustada entre 1 e 30 minutos.
+O dashboard também pode ser aberto diretamente em
+`http://127.0.0.1:8765/dashboard.html`.
+
+Para exibir a leitura atual, adicione uma fonte
+**Navegador** no OBS usando a URL da página correspondente, por exemplo:
 
 ```text
 http://127.0.0.1:8765/ENDERECO_DO_DISPOSITIVO.html
 ```
 
-Cada página consulta a leitura a cada segundo. Mantenha o script rodando para
-atualizar os batimentos; páginas de dispositivos sem leitura recente mostram
-`--`. O arquivo `.txt` contém somente o número do BPM mais recente.
+O segundo overlay mostra o gráfico de batimentos da última meia hora. Use o
+controle **Janela** para ajustar o intervalo exibido entre 1 e 30 minutos; sua
+URL tem o formato:
+
+```text
+http://127.0.0.1:8765/history/ENDERECO_DO_DISPOSITIVO.html
+```
+
+Cada gráfico atualiza a cada cinco segundos e mantém o histórico em memória
+enquanto o monitor está rodando. O histórico começa a ser coletado quando o
+sensor é monitorado e não é preservado após reiniciar o script. A página de
+leitura atual continua consultando a cada segundo; dispositivos sem leitura
+recente mostram `--`. O arquivo `.txt` contém somente o número do BPM mais
+recente.
 
 O suporte ANT+ depende do modelo do dongle. A versão atual do OpenANT procura
 sticks compatíveis com os IDs USB Dynastream `0fcf:1008` (ANTUSB2) e `0fcf:1009`
