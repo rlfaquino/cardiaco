@@ -1,0 +1,62 @@
+====================================================================
+  MONITOR DE FREQUÊNCIA CARDÍACA (BLE + ANT+) - GUIA PARA MACOS
+====================================================================
+
+Olá! Este pacote foi preparado para você rodar o Monitor Cardíaco
+no seu Mac com facilidade. Funciona tanto em Macs com chip Apple
+Silicon (M1, M2, M3, M4) quanto Intel.
+
+--------------------------------------------------------------------
+PASSO 1: INSTALAÇÃO (Só precisa fazer uma única vez)
+--------------------------------------------------------------------
+1. Dê um DUPLO CLIQUE no arquivo:
+      INSTALAR_NO_MAC.command
+
+   (O Terminal do Mac vai abrir e instalar tudo o que precisa
+   automaticamente via Homebrew e Python).
+
+2. MUITO IMPORTANTE - PERMISSÃO DE BLUETOOTH:
+   Durante a instalação ou ao rodar pela primeira vez, o macOS vai
+   exibir um aviso do sistema:
+      "Terminal" gostaria de usar o Bluetooth.
+   -> Clique em "Permitir" (ou "Allow").
+
+   * Dica: Se não perguntar ou der erro, vá em:
+     Ajustes do Sistema > Privacidade e Segurança > Bluetooth
+     e marque a chave ao lado de "Terminal".
+
+--------------------------------------------------------------------
+PASSO 2: COMO USAR NO DIA A DIA
+--------------------------------------------------------------------
+Sempre que quiser usar o monitor:
+
+1. Ligue seus sensores cardíacos (coloque no peito/braço para ativar).
+2. Se tiver um dongle USB ANT+, conecte-o no Mac (adaptador USB-C se necessário).
+3. Dê um DUPLO CLIQUE em:
+      Iniciar_Monitor_Cardiaco.command
+
+4. O script vai procurar seus sensores e iniciar o monitoramento.
+
+--------------------------------------------------------------------
+PASSO 3: OVERLAY PARA O OBS STUDIO
+--------------------------------------------------------------------
+Com o programa rodando, acesse no navegador ou adicione como fonte
+do tipo "Navegador" (Browser Source) no OBS Studio:
+
+  Painel com todos os atletas:
+  http://127.0.0.1:8765/index.htm
+
+  Dashboard completo:
+  http://127.0.0.1:8765/dashboard.html
+
+--------------------------------------------------------------------
+DÚVIDAS OU PROBLEMAS COMUNS NO MAC:
+--------------------------------------------------------------------
+- "O macOS não deixa abrir o arquivo .command" (Aviso do Gatekeeper):
+  Clique com o BOTÃO DIREITO (ou Control + Clique) em cima do arquivo
+  .command e escolha "Abrir", depois confirme em "Abrir".
+
+- "Permissão negada (Permission denied) no Terminal":
+  Abra o Terminal, arraste a pasta para dentro e rode:
+  chmod +x *.command *.sh
+====================================================================

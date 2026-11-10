@@ -1,6 +1,32 @@
+import ctypes.util
+import os
+import sys
 import threading
 import time
 from typing import Callable, List, Optional, Tuple
+
+# No macOS, PyUSB muitas vezes não localiza a biblioteca libusb instalada via Homebrew
+# em Apple Silicon (/opt/homebrew/lib) ou Intel (/usr/local/lib).
+if sys.platform == "darwin":
+    _orig_find_library = ctypes.util.find_library
+
+    def _macos_find_library(name: str):
+        res = _orig_find_library(name)
+        if res:
+            return res
+        if name in ("usb-1.0", "libusb-1.0", "usb"):
+            candidate_paths = [
+                "/opt/homebrew/lib/libusb-1.0.dylib",
+                "/usr/local/lib/libusb-1.0.dylib",
+                "/opt/homebrew/opt/libusb/lib/libusb-1.0.dylib",
+                "/usr/local/opt/libusb/lib/libusb-1.0.dylib",
+            ]
+            for path in candidate_paths:
+                if os.path.exists(path):
+                    return path
+        return None
+
+    ctypes.util.find_library = _macos_find_library
 
 import usb.core
 from openant.base.driver import DriverNotFound

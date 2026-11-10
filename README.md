@@ -2,7 +2,51 @@
 
 O script `monitor_batimentos.py` lê multiplos sensores de frequência cardíaca BLE (serviço padrão `180D`) e ANT+ (perfil Heart Rate) ao mesmo tempo e gera overlay para uso no OBS Studio.
 
-## Instalação
+## Instalação Rápida (Linux e macOS)
+
+O projeto conta com scripts automáticos de instalação preparados para configurar todo o ambiente:
+
+### No Linux (Ubuntu, Debian, Fedora, Arch, openSUSE, etc.)
+
+```bash
+./install.sh
+```
+
+O script instala dependências de sistema (`python3-venv`, `libusb`, `bluez`, `udev`), adiciona o usuário aos grupos de hardware (`plugdev`), instala regras udev para o dongle ANT+, ativa o Bluetooth e cria o ambiente virtual `.venv`.
+
+### No macOS (Apple Silicon M1/M2/M3/M4 e Intel)
+
+```bash
+./install_macos.sh
+# ou simplesmente: ./install.sh (ele detecta o macOS automaticamente)
+```
+
+O instalador para macOS:
+1. Verifica e utiliza o **Homebrew** (`brew`) para instalar `libusb` e `python3` (se necessário).
+2. Cria o ambiente virtual Python (`.venv`) e instala `bleak`, `openant` e `pyusb`.
+3. Ajusta a descoberta de bibliotecas dinâmicas do `libusb` para Apple Silicon (`/opt/homebrew/lib`) e Intel (`/usr/local/lib`).
+4. Testa a permissão de Bluetooth do sistema (**TCC**) e auxilia na autorização do Terminal nos **Ajustes do Sistema**.
+5. Cria o atalho executável `Iniciar_Monitor_Cardiaco.command` (permite iniciar com **duplo clique no Finder**).
+
+> **Atenção no macOS (Permissão de Bluetooth):** O macOS exige autorização explícita para o aplicativo de Terminal usar Bluetooth. Se solicitado na primeira execução, clique em **Permitir**. Caso necessário, ative em:  
+> *Ajustes do Sistema > Privacidade e Segurança > Bluetooth > Ativar para seu Terminal*.
+
+---
+
+### Executando o Aplicativo
+
+Após a instalação (em qualquer sistema operacional):
+
+```bash
+./run.sh --list     # Listar sensores BLE e ANT+ disponíveis
+./run.sh            # Iniciar o monitoramento interativo
+```
+
+No macOS, você também pode simplesmente dar um **duplo clique no arquivo `Iniciar_Monitor_Cardiaco.command`** pelo Finder.
+
+---
+
+## Instalação Manual (Opcional)
 
 Requer Python 3.8 a 3.13, Bluetooth habilitado para BLE e, opcionalmente,
 um dongle USB ANT+ para sensores ANT+. O projeto usa Bleak 0.22.x para manter

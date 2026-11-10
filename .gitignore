@@ -4,5 +4,6 @@ __pycache__/
 venv/
 *.txt
 !requirements.txt
+!COMO_INSTALAR_MAC.txt
 *.html
 index.htm
