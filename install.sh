@@ -333,7 +333,7 @@ elif command -v python >/dev/null 2>&1; then
 fi
 
 if [ -z "$PYTHON_BIN" ]; then
-    error "Interpretador Python não encontrado no sistema. Por favor, instale o Python 3.8 a 3.13."
+    error "Interpretador Python não encontrado no sistema. Por favor, instale o Python 3.8+."
     exit 1
 fi
 
@@ -385,13 +385,13 @@ REQ_FILE="$SCRIPT_DIR/requirements.txt"
 if [ -f "$REQ_FILE" ]; then
     if ! run_as_user "$VENV_PIP" install -r "$REQ_FILE"; then
         warning "Falha no pip install via requirements.txt. Tentando com opções diretas..."
-        run_as_user "$VENV_PIP" install "bleak>=0.22.3,<0.23" "openant>=1.3.4,<2" || {
+        run_as_user "$VENV_PIP" install "bleak>=0.22.3" "openant>=1.3.4,<2" || {
             error "Não foi possível instalar as dependências Python via pip."
             exit 1
         }
     fi
 else
-    run_as_user "$VENV_PIP" install "bleak>=0.22.3,<0.23" "openant>=1.3.4,<2"
+    run_as_user "$VENV_PIP" install "bleak>=0.22.3" "openant>=1.3.4,<2"
 fi
 
 # Garantir permissões de propriedade do .venv para o usuário comum caso tenha rodado via sudo
@@ -436,7 +436,7 @@ echo -e "${BOLD}${CYAN}--- Verificação e Diagnóstico ---${NC}"
 
 # Teste de importação de bibliotecas Python
 if "$VENV_PYTHON" -c "import bleak, openant, usb.core" 2>/dev/null; then
-    BLEAK_VER="$("$VENV_PYTHON" -c 'import bleak; print(bleak.__version__)')"
+    BLEAK_VER="$("$VENV_PYTHON" -c 'import importlib.metadata, bleak; print(getattr(bleak, "__version__", None) or importlib.metadata.version("bleak"))' 2>/dev/null || echo "")"
     success "Bibliotecas Python carregadas: Bleak ${BLEAK_VER}, OpenANT e PyUSB OK."
 else
     warning "Aviso ao carregar módulos Python no virtualenv. Teste com: ./run.sh --list"

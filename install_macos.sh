@@ -154,7 +154,7 @@ info "Instalando pacotes Python do projeto (Bleak e OpenANT)..."
 if [ -f "$SCRIPT_DIR/requirements.txt" ]; then
     "$VENV_PIP" install -r "$SCRIPT_DIR/requirements.txt"
 else
-    "$VENV_PIP" install "bleak>=0.22.3,<0.23" "openant>=1.3.4,<2"
+    "$VENV_PIP" install "bleak>=0.22.3" "openant>=1.3.4,<2"
 fi
 
 success "Ambiente Python virtual (.venv) configurado com sucesso!"

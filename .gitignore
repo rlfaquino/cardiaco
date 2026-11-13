@@ -9,3 +9,4 @@ venv/
 dist/
 *.html
 index.htm
+.vscode/
